@@ -346,6 +346,7 @@ SOURCES += \
     App.cpp \
     BTC.cpp \
     BTC_Address.cpp \
+    BTC_HeaderV2.cpp \
     BitcoinD.cpp \
     BitcoinD_RPCInfo.cpp \
     BlockProc.cpp \
@@ -397,6 +398,7 @@ HEADERS += \
     App.h \
     BTC.h \
     BTC_Address.h \
+    BTC_HeaderV2.h \
     BitcoinD.h \
     BitcoinD_RPCInfo.h \
     BlockProc.h \
@@ -475,6 +477,7 @@ SOURCES += \
     bitcoin/crypto/ctaes/ctaes.c \
     bitcoin/crypto/hmac_sha256.cpp \
     bitcoin/crypto/hmac_sha512.cpp \
+    bitcoin/crypto/blake2b.cpp \
     bitcoin/crypto/ripemd160.cpp \
     bitcoin/crypto/sha1.cpp \
     bitcoin/crypto/sha256.cpp \
@@ -512,6 +515,7 @@ HEADERS += \
     bitcoin/crypto/hmac_sha512.h \
     bitcoin/crypto/ripemd160.h \
     bitcoin/crypto/sha1.h \
+    bitcoin/crypto/blake2b.h \
     bitcoin/crypto/sha256.h \
     bitcoin/crypto/sha512.h \
     bitcoin/hash.h \
