@@ -25,27 +25,30 @@ before the fork, so the same entry point has to get both algorithms right.
 
 ## Status
 
-Done:
+Working end to end against a Bitcoin Knots v29.4.1.knots20260508rc2 node on
+testnet4, which activated the fork at height 149537.
 
 - `src/bitcoin/crypto/blake2b.{h,cpp}` — vendored from Knots (CC0 / OpenSSL /
   Apache-2.0), adapted only in its includes and its buffer wipe.
-- `src/BTC_HeaderV2.{h,cpp}` — v1/v2 detection, size-for-header, and the PoW
-  hash for both, with the test vectors.
+- `src/bitcoin/block.h`, `block_pow_v2.cpp` — `CBlockHeader` reads and writes
+  the v2 layout, and `GetHash()` picks the algorithm.
+- `src/BTC_HeaderV2.{h,cpp}` — the byte-level view: v1/v2 detection,
+  size-for-header, proof-of-work hash, and the test vectors.
+- **Storage** — header records are sized by the new `extended_headers` config
+  option, written padded and read trimmed to the length the version word
+  implies. The record array stores its own record size and refuses to open under
+  a different one, so switching the option on an existing DB is an error rather
+  than a silent misread.
+- **Controller / HeaderVerifier** — block ids and prev-links come from the
+  proof-of-work hash rather than from SHA256d.
+- **Protocol** — `blockchain.pow_algorithms`, and max protocol version 1.7.
 
-Not done yet, in the order it is being worked:
+Left to do:
 
-1. **`bitcoin::CBlockHeader`** — the deserializer still reads a fixed 80 bytes,
-   so a v2 block cannot be parsed for its transactions at all.
-2. **Storage** — the headers `DBRecordArray` has a fixed record size of 80.
-   The plan is an instance record size (80 by default, 164 for a chain that opts
-   in) stored in the DB metadata, so an existing database keeps its layout and
-   refuses to open under the wrong one rather than silently misreading it.
-   Padding to 164 costs ~84 MB per million blocks, which is the cheap side of
-   this trade.
-3. **Controller** — block download hardcodes `HEADER_SIZE` and derives the block
-   id with `BTC::HashRev`, which is only the proof-of-work hash for a v1 header.
-4. **`BTC::HeaderVerifier`** — the prev-link check hashes with SHA256d.
-5. **Protocol** — see below.
+- `blockchain.headers.subscribe` and the header merkle root used by `cp_height`
+  still need reviewing on a chain with mixed header lengths.
+- A client. Sparrow derives the block id the same wrong way, which is what
+  Shrike (`AcesHigh70/sparrow`, branch `blake2b-header`) fixes on its side.
 
 ## The protocol side
 
