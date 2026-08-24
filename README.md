@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="doc/shulcrum-logo.jpg" alt="Shulcrum" width="100%">
+</p>
+
 # Shulcrum
 
 **This is a fork of [Fulcrum](https://github.com/cculianu/Fulcrum) by Calin Culianu.** It is not
