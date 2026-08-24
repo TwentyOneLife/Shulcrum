@@ -287,6 +287,15 @@ public:
     static constexpr bool isMaxBatchInRange(unsigned n) { return n >= maxBatchMin && n <= maxBatchMax; }
     unsigned maxBatch = defaultMaxBatch;
 
+    // config: extended_headers
+    /// If true, this server indexes a chain whose block headers may be larger than 80 bytes -- the 164-byte v2
+    /// header of the BLAKE2b hardfork (bitcoinknots/bitcoin#359). Header records are then stored at the larger
+    /// size and the proof-of-work hash is picked per header rather than assumed to be SHA256d.
+    /// This decides the on-disk record size, so it cannot be changed without a re-index; the headers record
+    /// array refuses to open with a record size other than the one it was created with, which is the point.
+    static constexpr bool defaultExtendedHeaders = false;
+    bool extendedHeaders = defaultExtendedHeaders;
+
     // config: anon_logs
     static constexpr bool defaultAnonLogs = false;
     bool anonLogs = defaultAnonLogs; ///< if true, we hide IP addresses, Bitcoin addresses, and txid's from the Log()

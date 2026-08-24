@@ -19,6 +19,7 @@
 #include "App.h"
 #include "BlockProc.h"
 #include "BTC.h"
+#include "BTC_HeaderV2.h"
 #include "Controller.h"
 #include "Controller/SynchDSPsTask.h"
 #include "Controller/SynchMempoolTask.h"
@@ -499,6 +500,8 @@ struct DownloadBlocksTask : CtlTask
     int q_ct = 0;
     const int max_q; // todo: tune this, for now it is numBitcoinDClients + 1
 
+    /// Classic size. A v2 header is longer, so the length actually used is taken from the block
+    /// bytes themselves via BTC::HeaderSizeFor() -- see the getblock handler.
     static constexpr int HEADER_SIZE = BTC::GetBlockHeaderSize();
 
     std::atomic<size_t> nTx = 0, nIns = 0, nOuts = 0;
@@ -577,9 +580,13 @@ void DownloadBlocksTask::do_get(unsigned int bnum)
             submitRequest("getblock", {var, false}, [this, bnum, hash](const RPC::Message & resp){
                 try {
                     auto rawblock = Util::ParseHexFast(resp.result().toByteArray());
-                    const auto header = rawblock.left(HEADER_SIZE); // we need a deep copy of this anyway so might as well take it now.
+                    // The header's own version word says whether it is 80 or 164 bytes long, so read
+                    // that first rather than assuming the classic size.
+                    const int hdrSize = BTC::HeaderSizeFor(rawblock);
+                    const auto header = rawblock.left(hdrSize); // we need a deep copy of this anyway so might as well take it now.
                     QByteArray chkHash;
-                    if (bool sizeOk = header.length() == HEADER_SIZE; sizeOk && (chkHash = BTC::HashRev(header)) == hash) {
+                    if (bool sizeOk = hdrSize > 0 && header.length() == hdrSize;
+                            sizeOk && (chkHash = BTC::HeaderPoWHashRev(header)) == hash) {
                         PreProcessedBlockPtr maybe_ppb; // either this is filled
                         Controller::RpaOnlyModeDataPtr maybe_rpaOnlyMode;  // or this is.. but not both!
                         try {

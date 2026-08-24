@@ -21,6 +21,7 @@
 #include "App.h"
 #include "BitcoinD.h"
 #include "BTC.h"
+#include "BTC_HeaderV2.h"
 #include "BTC_Address.h"
 #include "Compat.h"
 #include "Merkle.h"
@@ -1357,16 +1358,18 @@ void Server::rpc_blockchain_block_headers(Client *c, const RPC::BatchId batchId,
         // EX doesn't seem to return error here if invalid height/no results, so we will do same.
         const auto hdrs = storage->headersFromHeight(height, std::min(count, MAX_COUNT));
         const size_t nHdrs = hdrs.size();
-        constexpr size_t hdrSz = BTC::GetBlockHeaderSize(), hdrHexSz = hdrSz*2u;
+        constexpr size_t hdrSz = BTC::GetBlockHeaderSize(), hdrHexSz = hdrSz*2u; // classic sizes; see below for v2
         QVariantMap resp{
             {"count", quint32(nHdrs)},
             {"max", MAX_COUNT}
         };
         auto getHeaderAndCheckSize = [&](size_t i) -> const QByteArray & {
             const auto & hdr = hdrs[i];
-            if (hdr.size() != QByteArray::size_type(hdrSz)) [[unlikely]] { // ensure header looks the right size
+            // A header is 80 bytes, or 164 if bit 31 of its version word marks the v2 layout.
+            if (hdr.size() != QByteArray::size_type(BTC::HeaderSizeFor(hdr))) [[unlikely]] {
                 // this should never happen.
-                Error() << "Header size from db height " << i + height << " is not " << hdrSz << " bytes! Database corruption likely! FIXME!";
+                Error() << "Header size from db height " << i + height << " is " << hdr.size()
+                        << " bytes, which is not what its version word says! Database corruption likely! FIXME!";
                 throw RPCError("Server header store invalid", RPC::Code_InternalError);
             }
             return hdr;
@@ -1381,10 +1384,16 @@ void Server::rpc_blockchain_block_headers(Client *c, const RPC::BatchId batchId,
             }
             resp["headers"] = headers;
         } else {
-            // Protocol version < 1.6.0, return a concatenated string of header hex
+            // Protocol version < 1.6.0, return a concatenated string of header hex.
+            // The client recovers individual headers by slicing every 80 bytes, so a header
+            // that is not 80 bytes cannot be delivered this way at all -- it would be sliced
+            // into silently wrong headers. Say so instead: 1.6 returns a list and has no such problem.
             QByteArray hexHeaders(QByteArray::size_type(nHdrs * hdrHexSz), Qt::Uninitialized);
             for (size_t i = 0, offset = 0; i < nHdrs; ++i, offset += hdrHexSz) {
                 const auto & hdr = getHeaderAndCheckSize(i);
+                if (hdr.size() != QByteArray::size_type(hdrSz))
+                    throw RPCError("This chain has block headers that are not 80 bytes; negotiate protocol"
+                                   " version 1.6 or higher to receive them", RPC::Code_InvalidRequest);
                 // fast, in-place conversion to hex
                 Util::ToHexFastInPlace(hdr, hexHeaders.data() + offset, hdrHexSz);
             }

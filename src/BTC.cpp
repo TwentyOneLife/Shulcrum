@@ -17,6 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 //
 #include "BTC.h"
+#include "BTC_HeaderV2.h"
 #include "Common.h"
 #include "Util.h"
 
@@ -104,7 +105,7 @@ namespace BTC
     bool HeaderVerifier::operator()(const QByteArray & header, QString *err)
     {
         const long height = prevHeight+1;
-        if (header.size() != BTC::GetBlockHeaderSize()) {
+        if (header.size() != BTC::HeaderSizeFor(header)) {
             if (err) *err = QString("Header verification failed for header at height %1: wrong size").arg(height);
             return false;
         }
@@ -120,7 +121,7 @@ namespace BTC
     {
         const long height = prevHeight+1;
         QByteArray header = Serialize(curHdr);
-        if (header.size() != BTC::GetBlockHeaderSize()) {
+        if (header.size() != BTC::HeaderSizeFor(header)) {
             if (err) *err = QString("Header verification failed for header at height %1: wrong size").arg(height);
             return false;
         }
@@ -132,13 +133,24 @@ namespace BTC
         return true;
     }
 
+    namespace {
+        /// The previous header's block id in wire order (the order hashPrevBlock is stored in).
+        QByteArray PrevHashForLinkCheck(const QByteArray &prevHeader) {
+            QByteArray h = HeaderPoWHashRev(prevHeader); // display order
+            std::reverse(h.begin(), h.end());
+            return h;
+        }
+    }
+
     bool HeaderVerifier::checkInner(long height, const bitcoin::CBlockHeader &curHdr, QString *err)
     {
         if (curHdr.IsNull()) {
             if (err) *err = QString("Header verification failed for header at height %1: failed to deserialize").arg(height);
             return false;
         }
-        if (!prev.isEmpty() && Hash(prev) != QByteArray::fromRawData(reinterpret_cast<const char *>(curHdr.hashPrevBlock.begin()), int(curHdr.hashPrevBlock.width())) ) {
+        // hashPrevBlock is in wire order, so compare against the un-reversed proof-of-work hash --
+        // SHA256d for a v1 previous header, the BLAKE2b pipeline for a v2 one.
+        if (!prev.isEmpty() && PrevHashForLinkCheck(prev) != QByteArray::fromRawData(reinterpret_cast<const char *>(curHdr.hashPrevBlock.begin()), int(curHdr.hashPrevBlock.width())) ) {
             if (err) *err = QString("Header %1 'hashPrevBlock' does not match the contents of the previous block").arg(height);
             return false;
         }

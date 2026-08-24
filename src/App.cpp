@@ -1332,6 +1332,17 @@ void App::parseArgs()
         const size_t memBytes = Util::getTotalPhysicalRAM() / 4u;
         options->db.maxMem = std::max(std::min(options->db.autoDefaultMaxMem, memBytes), options->db.oldDefaultMaxMem);
     }
+    if (conf.hasValue("extended_headers")) {
+        bool ok;
+        const bool val = conf.boolValue("extended_headers", options->defaultExtendedHeaders, &ok);
+        if (!ok)
+            throw BadArgs("extended_headers: bad value. Specify a boolean value such as 0, 1, true, false, yes, no");
+        options->extendedHeaders = val;
+        // log this later in case we are in syslog mode
+        Util::AsyncOnObject(this, [val]{ Log() << "config: extended_headers = " << (val ? "true" : "false")
+                                               << (val ? " (block headers may be 164 bytes)" : ""); });
+    }
+
     if (conf.hasValue("db_use_fsync")) {
         bool ok;
         const bool val = conf.boolValue("db_use_fsync", options->db.defaultUseFsync, &ok);

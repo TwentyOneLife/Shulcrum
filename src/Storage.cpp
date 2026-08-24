@@ -18,6 +18,7 @@
 //
 #include "App.h"
 #include "BTC.h"
+#include "BTC_HeaderV2.h"
 #include "ByteView.h"
 #include "CostCache.h"
 #include "CoTask.h"
@@ -1138,7 +1139,19 @@ struct Storage::Pvt
 
     Pvt(const Pvt &) = delete;
 
-    static constexpr int blockHeaderSize() noexcept { return BTC::GetBlockHeaderSize(); }
+    /// On-disk header record size: 80 normally, 164 on a chain with v2 (BLAKE2b) headers.
+    /// Set once from the `extended_headers` config option before the headers record array is opened.
+    /// The record array stores this in its own metadata and refuses to open under a different size,
+    /// so switching it on an existing DB is an error rather than a silent misread.
+    int headerRecSz = BTC::HeaderSizeV1;
+    int blockHeaderSize() const noexcept { return headerRecSz; }
+
+    /// Headers are stored padded to headerRecSz. Trim a record back to the length its own version
+    /// word claims -- 80 or 164 -- so callers never see the padding.
+    static QByteArray trimHeaderRecord(QByteArray rec) {
+        if (const int n = BTC::HeaderSizeFor(rec); n > 0 && rec.size() > n) rec.truncate(n);
+        return rec;
+    }
 
     /* NOTE: If taking multiple locks, all locks should be taken in the order they are declared, to avoid deadlocks. */
 
@@ -1700,6 +1713,10 @@ void Storage::openOrCreateDB(bool bulkLoad)
                                                        /* recSize = */ HashLen,
                                                        /* bucketNItems = */ 16,
                                                        /* magic = */ 0x000012e2); // may throw
+    p->headerRecSz = options->extendedHeaders ? BTC::HeaderSizeV2 : BTC::HeaderSizeV1;
+    if (options->extendedHeaders)
+        Log() << "Headers stored at " << p->headerRecSz << " bytes per record (extended_headers is on)";
+
     p->db.headersDRA = std::make_unique<DBRecordArray>(*p->db, *p->db.headers,
                                                        /* recSz = */ size_t(p->blockHeaderSize()),
                                                        /* bucketNItems = */ 8,
@@ -2096,7 +2113,7 @@ bool Storage::checkFulc1xUpgradeDB()
                         std::vector<QByteArray> res;
                         res.reserve(q.size());
                         for (const auto & header : q)
-                            totalBytes += res.emplace_back(BTC::HashRev(header).right(kRpaShortBlockHashLen)).size();
+                            totalBytes += res.emplace_back(BTC::HeaderPoWHashRev(header).right(kRpaShortBlockHashLen)).size();
                         std::unique_lock g(lock);
                         if (shortHashes.empty()) shortHashes.swap(res);
                         else shortHashes.insert(shortHashes.end(), res.begin(), res.end());
@@ -2238,7 +2255,7 @@ void Storage::checkUpgradeDBVersion()
         if (BTC::coinFromName(p->meta.coin) == BTC::Coin::BCH && p->meta.version < Meta::kMinBCHUpgrade9Version) {
             // Get the latest header to detect if we are after the activation time
             const Header hdr = headerVerifier().first.lastHeaderProcessed().second;
-            if (hdr.size() == BTC::GetBlockHeaderSize()) {
+            if (hdr.size() == BTC::HeaderSizeFor(hdr)) {
                 const auto bhdr = [&hdr] {
                     try {
                         return BTC::Deserialize<bitcoin::CBlockHeader>(hdr, 0, false, false, true, true);
@@ -2562,7 +2579,7 @@ auto Storage::latestTip(Header *hdrOut) const -> std::pair<int, HeaderHash> {
         if (hdrOut) hdrOut->clear();
     } else {
         // .ret now has the actual header but we want the hash
-        ret.second = BTC::HashRev(ret.second);
+        ret.second = BTC::HeaderPoWHashRev(ret.second);
     }
     return ret;
 }
@@ -2618,7 +2635,14 @@ void Storage::appendHeader(rocksdb::WriteBatch &batch, const Header &h, BlockHei
     if (height != targetHeight) [[unlikely]]
         throw InternalError(QString("Bad use of appendHeader -- expected height %1, got height %2").arg(targetHeight).arg(height));
     QString err;
-    const auto res = ctx.append(h, &err);
+    const int recSz = p->blockHeaderSize();
+    if (h.size() > recSz) [[unlikely]]
+        throw InternalError(QString("Refusing to append a %1-byte header at height %2: the record size is %3."
+                                    " A chain with v2 headers needs extended_headers = true and a re-index.")
+                                .arg(h.size()).arg(height).arg(recSz));
+    Header padded = h;
+    if (padded.size() < recSz) padded.append(recSz - padded.size(), '\0'); // stored padded, trimmed on read
+    const auto res = ctx.append(padded, &err);
     if (!err.isEmpty()) [[unlikely]]
         throw DatabaseError(QString("Failed to append header %1: %2").arg(height).arg(err));
     else if (!res || p->db.headersDRA->numRecords() != height + 1u) [[unlikely]]
@@ -2646,7 +2670,7 @@ auto Storage::headerForHeight(BlockHeight height, QString *err, HeaderHash *hash
         if (hashOut) *hashOut = tipHash;
     } else if (int(height) < tipHeight && int(height) >= 0) {
         ret = headerForHeight_nolock(height, err);
-        if (ret && hashOut) *hashOut = BTC::HashRev(*ret);
+        if (ret && hashOut) *hashOut = BTC::HeaderPoWHashRev(*ret);
     } else if (err) { *err = QStringLiteral("Height %1 is out of range").arg(height); }
     return ret;
 }
@@ -2656,7 +2680,7 @@ auto Storage::headerForHeight_nolock(BlockHeight height, QString *err) const -> 
     std::optional<Header> ret;
     try {
         QString err1;
-        ret.emplace( p->db.headersDRA->readRecord(height, &err1) );
+        ret.emplace( Pvt::trimHeaderRecord(p->db.headersDRA->readRecord(height, &err1)) );
         if (!err1.isEmpty()) {
             ret.reset();
             throw DatabaseError(QString("failed to read header %1: %2").arg(height).arg(err1));
@@ -2671,6 +2695,7 @@ auto Storage::headersFromHeight_nolock_nocheck(BlockHeight height, unsigned num,
 {
     if (err) err->clear();
     std::vector<Header> ret = p->db.headersDRA->readRecords(height, num, err);
+    for (auto &hdr : ret) hdr = Pvt::trimHeaderRecord(std::move(hdr));
 
     if (ret.size() != num && err && err->isEmpty())
         *err = "short header count returned from headers file";
@@ -4019,7 +4044,7 @@ BlockHeight Storage::undoLatestBlock(bool notifySubs)
         p->recentBlockTxHashes.clear(); // these are no longer relevant if undoing
 
         const auto [tip, header] = p->headerVerifier.lastHeaderProcessed();
-        if (tip <= 0 || header.length() != p->blockHeaderSize()) throw UndoInfoMissing("No header to undo");
+        if (tip <= 0 || header.length() != BTC::HeaderSizeFor(header)) throw UndoInfoMissing("No header to undo");
         prevHeight = unsigned(tip-1);
         Header prevHeader;
         {
@@ -4867,7 +4892,7 @@ auto Storage::getFirstUse(const HashX & hashX) const -> std::optional<FirstUse>
             const BlockHeight blockHeight = heightForTxNum(txNum).value(); // may throw
             return FirstUse(hashForTxNum(txNum).value(), /* .txHash */
                             blockHeight, /* .height */
-                            BTC::HashRev(headerForHeight(blockHeight).value()) /* .blockHash */);
+                            BTC::HeaderPoWHashRev(headerForHeight(blockHeight).value()) /* .blockHash */);
         } else {
             // try unconfirmed (mempool)
             auto [mempool, lock] = this->mempool();

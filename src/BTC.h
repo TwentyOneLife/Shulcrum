@@ -149,8 +149,14 @@ namespace BTC
     /// Appends prefix + token data to the end of byte stream `ba`. Will pre-reserve space first. May throw (unlikely).
     void SerializeTokenDataWithPrefix(QByteArray &ba, const bitcoin::token::OutputData *ptokenData);
 
-    /// Helper -- returns the size of a block header. Should always be 80. Update this if that changes.
+    /// Helper -- returns the size of a classic block header. A chain that activated the BLAKE2b
+    /// hardfork also has 164-byte headers: see HeaderSizeFor() in BTC_HeaderV2.h, which is what
+    /// code handling headers of unknown provenance should use.
     constexpr int GetBlockHeaderSize() noexcept { return 80; }
+    // from BTC_HeaderV2.h -- declared here so header-handling code in this namespace can see them
+    bool IsHeaderV2(const ByteView &) noexcept;
+    int HeaderSizeFor(const ByteView &) noexcept;
+    QByteArray HeaderPoWHashRev(const ByteView &);
 
     /// Returns the sha256 double hash (not reveresed -- little endian) of the input QByteArray. The results are copied
     /// once from the hasher into the returned QByteArray.  This is faster than obtaining a uint256 from bitcoin::Hash
@@ -201,7 +207,7 @@ namespace BTC
     /// hashPrevBlock of the current header matches the computed hash of the last header.
     /// If that is ever not the case, operator() returns false. Returns true otherwise.
     class HeaderVerifier {
-        QByteArray prev; // 80 byte header data or empty
+        QByteArray prev; // serialized header (80 or 164 bytes) or empty
         long prevHeight = -1;
 
         bool checkInner(long height, const bitcoin::CBlockHeader &, QString *err);
@@ -212,10 +218,10 @@ namespace BTC
         /// keep calling this from a loop. Returns false if current header's hashPrevBlock  != the last header's hash.
         bool operator()(const QByteArray & header, QString *err = nullptr);
         bool operator()(const bitcoin::CBlockHeader & header, QString *err = nullptr);
-        /// returns the height, 80 byte header of the last header seen. If no headers seen, returns (-1, Empty QByteArray)
+        /// returns the height and serialized header of the last header seen. If no headers seen, returns (-1, Empty QByteArray)
         std::pair<int, QByteArray> lastHeaderProcessed() const;
 
-        bool isValid() const { return prev.length() == GetBlockHeaderSize(); }
+        bool isValid() const { return prev.length() == HeaderSizeFor(prev); }
         void reset(unsigned nextHeight = 0, QByteArray prevHeader = QByteArray()) { prevHeight = long(nextHeight)-1; prev = prevHeader; }
     };
 
