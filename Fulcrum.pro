@@ -470,6 +470,7 @@ SOURCES += \
     bitcoin/amount.cpp \
     bitcoin/base58.cpp \
     bitcoin/block.cpp \
+    bitcoin/block_pow_v2.cpp \
     bitcoin/cashaddr.cpp \
     bitcoin/cashaddrenc.cpp \
     bitcoin/crypto/aes.cpp \

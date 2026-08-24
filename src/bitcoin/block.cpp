@@ -13,6 +13,9 @@
 namespace bitcoin {
 
 uint256 CBlockHeader::GetHash() const {
+    // A v2 header is not hashed by serializing it: its proof of work is a BLAKE2b
+    // pipeline over a different commitment structure entirely.
+    if (m_header_v2) return GetBlake2bPoWHash();
     return SerializeHash(*this);
 }
 
