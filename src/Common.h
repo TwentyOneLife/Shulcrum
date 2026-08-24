@@ -56,8 +56,12 @@ struct Exception : std::runtime_error
 struct InternalError : Exception { using Exception::Exception; ~InternalError() override; };
 struct BadArgs : Exception { using Exception::Exception; ~BadArgs() override; };
 
-#define APPNAME "Fulcrum"
-#define VERSION "2.1.2"
+// This is a fork of Fulcrum (cculianu/Fulcrum) that serves chains whose block headers
+// are not 80 bytes and whose proof of work is not SHA256d. It reports itself under its
+// own name so nobody mistakes it for an upstream release: the two behave differently on
+// the wire, and upstream is not responsible for what this one does.
+#define APPNAME "Shulcrum"
+#define VERSION "2.1.2-blake2b.1"
 #ifdef QT_DEBUG
 inline constexpr bool isReleaseBuild() { return false; }
 #else

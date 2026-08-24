@@ -72,5 +72,7 @@ Thumbs.db
 *.dll
 *.exe
 Fulcrum
-build/
-build-tests/
+/build/
+/build-tests/
+/contrib/build/*/work*/
+/dist/

@@ -28,11 +28,20 @@ RUN \
     apt -qy autoremove && \
     apt -qy autoclean
 
-# Install latest CMake 3.25.x (bionic, focal, or jammy only)
+# Install a recent CMake. The ppa:ecal/cmake-3.25 this used to come from no longer resolves,
+# so take the official upstream binary instead: same version family, one fewer moving part,
+# and it is checked against its published SHA256 rather than trusted blindly.
+ARG CMAKE_VERSION=3.28.6
+ARG CMAKE_SHA256=931e3c0d546ee03ca72bb147ccd9b49e3b6252f765f66bf21b9d165519940458
 RUN \
-    add-apt-repository -y ppa:ecal/cmake-3.25 && \
-    apt -qy update && \
-    apt -y install cmake ninja-build && \
+    apt -y install ninja-build && \
+    wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" && \
+    echo "${CMAKE_SHA256}  cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" | sha256sum -c - && \
+    tar -xzf "cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" -C /opt && \
+    ln -sf "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake" /usr/local/bin/cmake && \
+    ln -sf "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest" /usr/local/bin/ctest && \
+    rm -f "cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" && \
+    cmake --version && \
     apt -qy autoremove && apt -qy autoclean
 
 # Ensure we statically link libstdc++ otherwise produced binaries won't be compatible with stock systems
