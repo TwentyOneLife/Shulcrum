@@ -25,8 +25,10 @@ before the fork, so the same entry point has to get both algorithms right.
 
 ## Status
 
-Working end to end against a Bitcoin Knots v29.4.1.knots20260508rc2 node on
-testnet4, which activated the fork at height 149537.
+All four pieces are written and compile, and the server is indexing testnet4
+against a Bitcoin Knots v29.4.1.knots20260508rc2 node as this is written. That
+chain activated the fork at height 149537, so crossing it is the test that
+matters; until this line says otherwise, it has not been crossed yet.
 
 - `src/bitcoin/crypto/blake2b.{h,cpp}` — vendored from Knots (CC0 / OpenSSL /
   Apache-2.0), adapted only in its includes and its buffer wipe.
