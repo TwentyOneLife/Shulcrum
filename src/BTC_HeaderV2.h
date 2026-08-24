@@ -44,4 +44,8 @@ namespace BTC {
     /// bug worth surfacing rather than a hash worth returning.
     QByteArray HeaderPoWHashRev(const ByteView &header);
 
+    /// The same hash in wire (internal, little-endian) order, which is what hashPrevBlock holds
+    /// and what the header merkle tree is built from.
+    QByteArray HeaderPoWHash(const ByteView &header);
+
 } // namespace BTC

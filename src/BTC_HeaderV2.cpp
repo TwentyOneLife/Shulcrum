@@ -14,6 +14,7 @@
 
 #include "App.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace {
@@ -47,6 +48,13 @@ namespace BTC {
             throw std::invalid_argument("HeaderPoWHashRev: v2 header is not 164 bytes");
         const auto hdr = BTC::Deserialize<bitcoin::CBlockHeader>(header.toByteArray(false));
         return BTC::Hash2ByteArrayRev(hdr.GetBlake2bPoWHash());
+    }
+
+    QByteArray HeaderPoWHash(const ByteView &header)
+    {
+        QByteArray ret = HeaderPoWHashRev(header);
+        std::reverse(ret.begin(), ret.end());
+        return ret;
     }
 
 } // namespace BTC
