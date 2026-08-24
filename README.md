@@ -1,3 +1,33 @@
+# Shulcrum
+
+**This is a fork of [Fulcrum](https://github.com/cculianu/Fulcrum) by Calin Culianu.** It is not
+his software and he is not responsible for it: everything below this section is his README,
+kept as it was.
+
+Shulcrum indexes and serves a chain whose block headers are **164 bytes** and whose proof of
+work is **BLAKE2b** rather than SHA256d — the hardfork proposed in
+[bitcoinknots/bitcoin#359](https://github.com/bitcoinknots/bitcoin/pull/359). Upstream Fulcrum
+assumes 80-byte headers and SHA256d in the places that matter, so on such a chain it rejects
+every block.
+
+What is different here:
+
+- Headers are read, stored and served at the length their own version word claims: 80, or 164
+  when bit 31 marks the v2 layout. Block ids come from each header's proof-of-work hash.
+- New config option **`extended_headers`** (off by default — leave it off for Bitcoin, BCH and
+  Litecoin). It sets the on-disk record size, so it cannot be flipped on an existing database.
+- New method **`blockchain.pow_algorithms`** and max protocol version **1.7**, which tells a
+  light client which algorithm applies from which height. The activation height is not
+  configured: it is found by binary search over the stored headers.
+- It reports itself as `Shulcrum` over the wire, so nobody mistakes it for an upstream release.
+
+See [`doc/blake2b-headers.md`](doc/blake2b-headers.md) for the details and for what has been
+verified against testnet4.
+
+Same license as upstream: GPLv3.
+
+---
+
 # ![Image FulcrumLogo](https://raw.githubusercontent.com/cculianu/Fulcrum-art/master/F-circle2_grn_64.png) Fulcrum
 
 [![Docker Build](https://github.com/cculianu/Fulcrum/actions/workflows/publish.yml/badge.svg)](https://github.com/cculianu/Fulcrum/actions/workflows/publish.yml)
