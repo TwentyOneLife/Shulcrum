@@ -347,6 +347,7 @@ SOURCES += \
     BTC.cpp \
     BTC_Address.cpp \
     BTC_HeaderV2.cpp \
+    ProtocolV2.cpp \
     BitcoinD.cpp \
     BitcoinD_RPCInfo.cpp \
     BlockProc.cpp \
@@ -399,6 +400,7 @@ HEADERS += \
     BTC.h \
     BTC_Address.h \
     BTC_HeaderV2.h \
+    ProtocolV2.h \
     BitcoinD.h \
     BitcoinD_RPCInfo.h \
     BlockProc.h \

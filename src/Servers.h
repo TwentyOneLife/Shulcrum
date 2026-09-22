@@ -365,7 +365,20 @@ public:
     static QVariantMap makeFeaturesDictForConnection(AbstractConnection *, const QByteArray &genesisHash,
                                                      const Options & options, bool hasDSProofRPC, bool hasCashTokens,
                                                      int rpaStartingHeight /* <=-1 means no RPA */,
-                                                     bool hasBroadcastPackage);
+                                                     bool hasBroadcastPackage,
+                                                     const QVariantMap &blake2bFork /* empty on a chain with no v2 header */);
+
+    /// Has this chain produced a v2 (164-byte) header? Cheap: a cached answer from storage.
+    bool chainHasV2Headers() const;
+
+    /// Throws RPCErrorWithDisconnect if this client may not be served block headers on this chain.
+    /// Called by every handler that returns a header. See ProtocolV2.h for why it is not enough to
+    /// refuse at the handshake.
+    void requireHeaderCapableClient(const Client *) const;
+
+    /// The `blake2b_fork` map for a chain that has one, or an empty map. Static because the PeerMgr
+    /// builds a features dict too, from its own read-only view of the same storage.
+    static QVariantMap blake2bForkPoint(const Storage &);
 
     virtual QString prettyName() const override;
 

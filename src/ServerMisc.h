@@ -31,6 +31,11 @@ namespace ServerMisc
     /// applies from which height. A client that verifies work itself cannot follow a chain that
     /// changed algorithms without being told, and nothing before 1.7 says it.
     inline constexpr Version MinProtocolVersion{1, 4, 0}, MaxProtocolVersion{1, 7, 0};
+    /// Offered only on a chain that has produced a v2 (164-byte) header, and required of any client
+    /// that wants one. 1.8 is the version that states a header's length is read from its version
+    /// word rather than assumed. A chain without such a header never offers it, and peers are
+    /// unaffected: they keep to MaxProtocolVersion above. See ProtocolV2.h.
+    inline constexpr Version MaxProtocolVersionV2{1, 8, 0};
     /// The first version where we expect clients to be "token aware" and thus we return token_data to them by default
     /// in e.g. listunspent and get_balance.
     inline constexpr Version MinTokenAwareProtocolVersion{1, 5, 0};
