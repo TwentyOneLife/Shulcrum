@@ -2378,7 +2378,9 @@ void Server::rpc_blockchain_transaction_get_confirmed_blockhash(Client *c, const
             throw RPCError("No confirmed transaction matching the requested hash was found");
         const auto & [blockHeight, blockHeader] = *optPair;
         QVariantMap ret{
-            { "block_hash", Util::ToHexFast(BTC::HashRev(blockHeader)) },
+            // The block id, which on a v2 header is its BLAKE2b hash and not SHA256d over the
+            // 164 bytes. Every other block hash this server reports comes from here too.
+            { "block_hash", Util::ToHexFast(BTC::HeaderPoWHashRev(blockHeader)) },
             { "block_height", blockHeight },
         };
         if (includeHeader) ret.insert("block_header", Util::ToHexFast(blockHeader));

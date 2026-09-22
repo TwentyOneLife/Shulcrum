@@ -131,6 +131,13 @@ check(fork.get("hash") == cli("getblockhash", str(ACTIVATION)),
       "blake2b_fork's hash is the block hash the node reports for that height")
 check(fork.get("header_bytes") == 164 and fork.get("block_hash") == "blake2b",
       "blake2b_fork states the header size and the hash function")
+coinbase_of = lambda h: json.loads(cli("getblock", cli("getblockhash", str(h))))["tx"][0]
+for height in (ACTIVATION - 10, ACTIVATION + 1):
+    reply = new.call("blockchain.transaction.get_confirmed_blockhash", [coinbase_of(height)])
+    layout = "v1" if height < ACTIVATION else "v2"
+    check(reply["result"]["block_hash"] == cli("getblockhash", str(height)),
+          f"the block hash reported for a transaction in a {layout} block is the node's own")
+
 algos = new.call("blockchain.pow_algorithms")["result"]
 check({"from_height": ACTIVATION, "algorithm": "blake2b-v2"} in algos,
       "pow_algorithms agrees about where the algorithm changes")
