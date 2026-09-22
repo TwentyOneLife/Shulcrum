@@ -2656,6 +2656,12 @@ void Storage::appendHeader(rocksdb::WriteBatch &batch, const Header &h, BlockHei
 
 void Storage::deleteHeadersPastHeight(rocksdb::WriteBatch &batch, BlockHeight height)
 {
+    // A reorg back across the activation height leaves the cached height pointing at a block this
+    // chain no longer has, so forget it and let the next caller search again.
+    if (const auto cached = p->blake2bActivationHeightCache.load(std::memory_order_relaxed);
+            cached >= 0 && uint64_t(cached) > uint64_t(height))
+        p->blake2bActivationHeightCache.store(kNoBlake2bHeightCached, std::memory_order_relaxed);
+
     QString err;
     auto ctx = p->db.headersDRA->beginBatchWrite(batch);
     const auto res = ctx.truncate(height + 1u, &err);
@@ -2805,6 +2811,10 @@ void Storage::loadCheckHeadersInDB()
     if (!p->merkleCache->isInitialized() && !hVec.empty())
         p->merkleCache->initialize(hVec); // this may take a few seconds, and it may also throw
 
+    // Warm the activation-height cache here rather than leaving it to the first caller, which would
+    // be a client's handshake doing ~18 header reads on a server thread. It also makes the answer
+    // known before any block is appended, which is what lets addBlock extend it by assignment.
+    blake2bActivationHeight();
 }
 
 void Storage::loadCheckTxNumsDRAAndBlkInfo()
@@ -3967,6 +3977,15 @@ void Storage::addBlock(PreProcessedBlockPtr ppb, bool saveUndo, unsigned nReserv
 
             if (auto st = p->db->Write(p->db.defWriteOpts, &batch) ; !st.ok())
                 throw DatabaseError(QString("Batch write fail for block height %1: %2").arg(ppb->height).arg(StatusString(st)));
+
+            // A chain reaches its activation height while the server is running, with clients already
+            // attached, which is the ordinary case rather than a corner one. The cached answer would
+            // otherwise say "no fork" for the life of the process, and everything keyed on it would
+            // describe a chain that no longer exists. Safe as an assignment rather than a re-search
+            // because the layout switches exactly once: if we knew there was no v2 header before
+            // this one, then this one is the first.
+            if (p->blake2bActivationHeightCache.load(std::memory_order_relaxed) == -1 && BTC::IsHeaderV2(rawHeader))
+                p->blake2bActivationHeightCache.store(int64_t(ppb->height), std::memory_order_relaxed);
 
             undoVerifierOnScopeEnd.disable(); // indicate to the "Defer" object declared at the top of this function that it shouldn't undo anything anymore as we are happy now with the db state now.
         }
