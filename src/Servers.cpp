@@ -26,6 +26,7 @@
 #include "Compat.h"
 #include "Merkle.h"
 #include "PeerMgr.h"
+#include "ProtocolV2.h"
 #include "Rpa.h"
 #include "ServerMisc.h"
 #include "SrvMgr.h"
@@ -1115,8 +1116,18 @@ void Server::rpc_server_donation_address(Client *c, const RPC::BatchId batchId, 
     emit c->sendResult(batchId, m.id, transformDefaultDonationAddressToBTCOrBCHOrLTC(*options, isNonBCH(), isLTC()));
 }
 /* static */
+QVariantMap Server::blake2bForkPoint(const Storage &storage)
+{
+    const auto activation = storage.blake2bActivationHeight();
+    if (!activation) return {}; // this chain never forked, which is the honest answer for most of them
+    Storage::HeaderHash hash;
+    if (!storage.headerForHeight(*activation, nullptr, &hash) || hash.isEmpty()) return {};
+    return ProtocolV2::forkPointMap(*activation, Util::ToHexFast(hash));
+}
+
 QVariantMap Server::makeFeaturesDictForConnection(AbstractConnection *c, const QByteArray &genesisHash, const Options &opts,
-                                                  bool dsproof, bool hasCashTokens, int rpaStartingHeight, bool hasBroadcastPackage)
+                                                  bool dsproof, bool hasCashTokens, int rpaStartingHeight, bool hasBroadcastPackage,
+                                                  const QVariantMap &blake2bFork)
 {
     QVariantMap r;
     if (!c) {
@@ -1129,8 +1140,11 @@ QVariantMap Server::makeFeaturesDictForConnection(AbstractConnection *c, const Q
     r["genesis_hash"] = QString(Util::ToHexFast(genesisHash));
     r["server_version"] = ServerMisc::AppSubVersion;
     r["protocol_min"] = ServerMisc::MinProtocolVersion.toString();
-    r["protocol_max"] = ServerMisc::MaxProtocolVersion.toString();
-    r["hash_function"] = ServerMisc::HashFunction;
+    r["protocol_max"] = ProtocolV2::maxNegotiable(!blake2bFork.isEmpty()).toString();
+    r["hash_function"] = ServerMisc::HashFunction; // the scripthash function, which this fork does not change
+    // Which chain this is. `genesis_hash` cannot say: a fork that keeps its history shares it with
+    // the chain it forked from, so two servers report the same one and serve chains that diverge.
+    if (!blake2bFork.isEmpty()) r["blake2b_fork"] = blake2bFork;
     r["dsproof"] = dsproof;
     if (hasCashTokens)
         r["cashtokens"] = true;
@@ -1196,7 +1210,8 @@ void Server::rpc_server_features(Client *c, const RPC::BatchId batchId, const RP
                        makeFeaturesDictForConnection(c, storage->genesisHash(), *options, rsi.hasDSProofRPC,
                                                      /* cashTokens = */ isBCH,
                                                      /* rpaStartHeight = */ storage->getConfiguredRpaStartHeight(),
-                                                     rsi.hasSubmitPackageRPC));
+                                                     rsi.hasSubmitPackageRPC,
+                                                     blake2bForkPoint(*storage)));
 }
 void Server::rpc_server_peers_subscribe(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
@@ -1242,6 +1257,13 @@ void Server::rpc_server_version(Client *c, const RPC::BatchId batchId, const RPC
     if (c->info.alreadySentVersion)
         throw RPCError(QString("%1 already sent").arg(m.method));
 
+    // A property of the chain, not a constant: a chain that has produced a v2 header offers 1.8,
+    // and every other chain is unchanged. Connecting below it stays allowed, unlike the
+    // specification's server: a client that never asks for a header is served correctly here, and
+    // the explorer this server feeds is one of those. What a client below 1.8 cannot have is a
+    // header, which is enforced where headers are served. See ProtocolV2.h.
+    const Version maxNegotiable = ProtocolV2::maxNegotiable(chainHasV2Headers());
+
     Version pver;
     if (const auto sl = l[1].toStringList(); sl.size() == 2) {
         // Ergh. EX also supports (protocolMin, protocolMax) tuples as the second arg! :/
@@ -1250,19 +1272,27 @@ void Server::rpc_server_version(Client *c, const RPC::BatchId batchId, const RPC
         if (!cMin.isValid() || !cMax.isValid() || cMin > cMax)
             throw RPCErrorWithDisconnect(QString("Bad version tuple: %1").arg(sl.join(", ")));
 
-        pver = std::min(cMax, ServerMisc::MaxProtocolVersion);
+        pver = std::min(cMax, maxNegotiable);
         if (pver < std::max(cMin, ServerMisc::MinProtocolVersion))
             pver = Version();
     } else {
         pver = l[1].toString().left(kMaxServerVersionLen); // try and parse version, see Version.cpp, QString constructor.
     }
-    if (!pver.isValid() || pver < ServerMisc::MinProtocolVersion || pver > ServerMisc::MaxProtocolVersion)
+    if (!pver.isValid() || pver < ServerMisc::MinProtocolVersion || pver > maxNegotiable)
         throw RPCErrorWithDisconnect("Unsupported protocol version");
 
     c->info.userAgent = l[0].toString().left(kMaxServerVersionLen);
     c->info.protocolVersion = pver;
     c->info.alreadySentVersion = true;
     emit c->sendResult(batchId, m.id, QStringList({ServerMisc::AppSubVersion, pver.toString()}));
+}
+
+bool Server::chainHasV2Headers() const { return storage->blake2bActivationHeight().has_value(); }
+
+void Server::requireHeaderCapableClient(const Client *c) const
+{
+    if (!ProtocolV2::mayServeHeaders(chainHasV2Headers(), c->info.protocolVersion))
+        throw RPCErrorWithDisconnect(ProtocolV2::HeaderRefusal);
 }
 
 /// returns the 'branch' and 'root' keys ready to be put in the results dictionary
@@ -1290,6 +1320,7 @@ auto Server::getHeadersBranchAndRoot(unsigned height, unsigned cp_height) -> Hea
 
 void Server::rpc_blockchain_block_header(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
+    requireHeaderCapableClient(c);
     const QVariantList l = m.paramsList();
     assert(!l.isEmpty());
     bool ok;
@@ -1331,6 +1362,7 @@ void Server::rpc_blockchain_block_header(Client *c, const RPC::BatchId batchId, 
 
 void Server::rpc_blockchain_block_headers(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
+    requireHeaderCapableClient(c);
     const QVariantList l = m.paramsList();
     assert(l.size() >= 2);
     bool ok;
@@ -1470,12 +1502,14 @@ static QVariantMap mkHeaderHexResponse(unsigned height, const QByteArray & heade
 }
 void Server::rpc_blockchain_headers_get_tip(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
+    requireHeaderCapableClient(c);
     Storage::Header hdr;
     const auto [height, _] = storage->latestTip(&hdr);
     emit c->sendResult(batchId, m.id, mkHeaderHexResponse(unsigned(std::max(0, height)), hdr));
 }
 void Server::rpc_blockchain_headers_subscribe(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
+    requireHeaderCapableClient(c);
     Storage::Header hdr;
     const auto [height, hhash] = storage->latestTip(&hdr);
     // we assume everything is peachy and don't check header size, etc as we can't really get here until we have synched at least *some* headers.
@@ -1483,6 +1517,16 @@ void Server::rpc_blockchain_headers_subscribe(Client *c, const RPC::BatchId batc
         c->headerSubConnection =
             // connect to signal. Will be emitted directly to object until it dies, or until unsubscribed.
             connect(this, &Server::newHeader, c, [c, meth=m.method](unsigned height, const QByteArray &header){
+                // The chain may have crossed its activation height since this client subscribed, in
+                // which case this is the first header it cannot read. Drop it rather than send it:
+                // it reconnects, and then learns why at server.version. Checked on the header in
+                // hand rather than on the chain, because that is the thing about to be sent.
+                if (BTC::IsHeaderV2(header) && !ProtocolV2::mayServeHeaders(true, c->info.protocolVersion)) {
+                    Log() << c->prettyName(false, false) << " negotiated protocol " << c->info.protocolVersion.toString()
+                          << " and cannot read the new header; disconnecting it";
+                    c->do_disconnect();
+                    return;
+                }
                 // the notification is a list of size 1, with a dict in it. :/
                 emit c->sendNotification(meth, QVariantList({mkHeaderHexResponse(height, header)}));
             });
@@ -1515,6 +1559,7 @@ void Server::rpc_blockchain_headers_unsubscribe(Client *c, const RPC::BatchId ba
 }
 void Server::rpc_blockchain_header_get(Client *c, const RPC::BatchId batchId, const RPC::Message &m)
 {
+    requireHeaderCapableClient(c);
     const QVariantList l(m.paramsList());
     assert(!l.isEmpty());
     // We support the first arg as either a 64-character hash or a numeric height
@@ -2324,6 +2369,9 @@ void Server::rpc_blockchain_transaction_get_confirmed_blockhash(Client *c, const
             throw RPCError("Invalid second argument; expected boolean");
         includeHeader = arg;
     }
+    // Only when a header is actually asked for: the block hash and height are readable by any
+    // client, and refusing them would take this beyond what the header rule is about.
+    if (includeHeader) requireHeaderCapableClient(c);
     generic_do_async(c, batchId, m.id, [txHash, includeHeader, this]{
         const auto optPair = storage->getConfirmedTxBlockHeightAndHeader(txHash);
         if (!optPair)

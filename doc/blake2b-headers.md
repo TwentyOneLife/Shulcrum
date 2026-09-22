@@ -60,14 +60,17 @@ the server.
   than a silent misread.
 - **Controller / HeaderVerifier** — block ids and prev-links come from the
   proof-of-work hash rather than from SHA256d.
-- **Protocol** — `blockchain.pow_algorithms`, and max protocol version 1.7.
+- **Protocol** — `blockchain.pow_algorithms`; protocol 1.8 on a chain that has
+  produced a v2 header, with headers refused to clients below it, and a
+  `blake2b_fork` point in `server.features`. See `ProtocolV2.h`.
 
 Left to do:
 
-- `blockchain.headers.subscribe` and the header merkle root used by `cp_height`
-  still need reviewing on a chain with mixed header lengths.
+- The header merkle root used by `cp_height` still needs reviewing on a chain
+  with mixed header lengths.
 - A client. Sparrow derives the block id the same wrong way, which is what
-  Shrike (`AcesHigh70/sparrow`, branch `blake2b-header`) fixes on its side.
+  Shrike (`privkeyio/shrike`) fixes on its side. It continues
+  `AcesHigh70/sparrow` branch `blake2b-header`, which is no longer maintained.
 
 ## The protocol side
 
@@ -76,8 +79,16 @@ as a list of hex strings rather than one concatenated blob (`headersAsList` in
 `Servers.cpp`), so header boundaries are explicit and a 164-byte entry needs
 nothing new. Clients negotiating 1.5 or lower get the concatenated form and
 recover headers by slicing every 80 bytes; on a chain with mixed header lengths
-that cannot be served correctly, which argues for gating such a chain behind
-1.6+ rather than changing the old shape.
+that cannot be served correctly.
+
+That gating is now in, and higher than 1.6. A chain that has produced a v2 header
+offers protocol 1.8, the version that states a header's length is read from its
+version word, and serves headers only to a client that negotiated it. A client
+below 1.8 may still connect, because one that never asks for a header works
+correctly here, but every method that returns a header refuses it and says why,
+and a subscriber that cannot read a new v2 tip is disconnected rather than sent
+it. The rules and the reasoning are in `ProtocolV2.h`; they follow the draft
+specification `docs/electrum-header-v2.md` in `paulscode/electrs-pruned`.
 
 What is genuinely missing is telling the client **which algorithm applies from
 which height**, since a light client verifies the work itself and cannot guess.
