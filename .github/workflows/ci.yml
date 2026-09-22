@@ -1,0 +1,59 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [blake2b-headers]
+
+jobs:
+  build-and-test:
+    # 24.04, not ubuntu-latest: the recipe relies on this release's librocksdb 8.9.1, which builds
+    # the tree unmodified. A runner image that moves would change the dependency underneath us.
+    runs-on: ubuntu-24.04
+    steps:
+      # Actions are pinned to a commit rather than a tag, since a tag can move.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y --no-install-recommends \
+            build-essential pkg-config qtbase5-dev qtbase5-dev-tools \
+            librocksdb-dev libzmq3-dev libjemalloc-dev libminiupnpc-dev \
+            libssl-dev libbz2-dev zlib1g-dev
+
+      - name: Build, with the test suites compiled in
+        # The LIBS line is required: Fulcrum.pro expects the upstream static recipe to supply these,
+        # and without it the compile succeeds and the link fails.
+        run: |
+          mkdir build && cd build
+          qmake ../Fulcrum.pro CONFIG+=release DEFINES+=ENABLE_TESTS \
+            "LIBS+=-lrocksdb -lz -lbz2 -lzmq -lminiupnpc -ljemalloc"
+          make -j"$(nproc)"
+          ./Fulcrum --version
+
+      - name: Test
+        run: build/Fulcrum --test all
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shulcrum-linux-x86_64
+          path: build/Fulcrum
+          if-no-files-found: error
+
+  no-internal-refs:
+    # This repo carries upstream Fulcrum's files, whose example configs and peer lists contain
+    # private addresses and onion hosts that are not ours. So the check reads only the lines this
+    # fork adds on top of upstream's 2.1.2 commit, which is where a leak of our own would appear.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Guard against infra leakage in our own changes
+        run: |
+          if git diff 6c9f074 -U0 -- . ':!.github/workflows/ci.yml' | grep -E '^\+[^+]' \
+             | grep -nE '192\.168\.[0-9]|(^|[^0-9.])10(\.[0-9]{1,3}){3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]|/home/|/data/|[a-z2-7]{16,56}\.onion'; then
+            echo "Internal infrastructure reference in a line this fork adds; see above."
+            exit 1
+          fi
+          echo "no internal refs in this fork's changes"
