@@ -61,7 +61,17 @@ struct BadArgs : Exception { using Exception::Exception; ~BadArgs() override; };
 // own name so nobody mistakes it for an upstream release: the two behave differently on
 // the wire, and upstream is not responsible for what this one does.
 #define APPNAME "Shulcrum"
-#define VERSION "2.1.2-blake2b.1"
+// The base is upstream's tag, which is where this fork diverges; the suffix is ours, and it is
+// spelled out rather than abbreviated because this string is what a wallet shows a stranger.
+//
+// Not `2.1.2-blake2b.2`: that name belongs to upstream's sequence, and if they ever publish it the
+// ecosystem would hold two different commits under one version. This build answers `server.version`
+// and `server.features` for a chain with one server; a name collision there is not a tidiness
+// problem, it is someone debugging the wrong software.
+//
+// Only reporting depends on this: the banner, `server.version`, `server.features` and the peer
+// advertisement. Protocol negotiation keys on the protocol version, which is separate.
+#define VERSION "2.1.2-blake2b.1-twentyonelife.1"
 #ifdef QT_DEBUG
 inline constexpr bool isReleaseBuild() { return false; }
 #else
